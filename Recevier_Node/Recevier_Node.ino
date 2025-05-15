@@ -18,22 +18,21 @@ MCP_CAN CAN0(AVR_UNO_CS);
 long unsigned int rxId;
 unsigned char len = 0;
 unsigned char rxBuf[8];
-char msgString[128];                        // Array to store serial string
 
 // state machine variables
 static bool changetoSlave = true;
-static bool isSEEDRequestReceived = false;
+static bool isAliceRecevied = false;
 static bool isBobSent = false;
 static bool isNetworkInLockDown = false;
 
-static int burst = -1;
+static unsigned char burst = 0;
 unsigned char networkLockDown = 0;  
 unsigned char iteration = 0;
 unsigned char failsafe = 0;
 
 // Encryption algorithm variables
 unsigned char initialKey[17] = "Initial Keysssss";
-long encryptedFrame;
+long unsigned int encryptedFrame = 0;
 unsigned char encryptedMessage[17];
 
 // ECDH variables with sugestive names for better tracking
@@ -43,7 +42,6 @@ int bob_secret;
 Point bob_pub;
 Point bob_shared;
 
-Point alice_pub;
 
 //------------------------------END of variable init----------------------------------
 
@@ -86,8 +84,6 @@ void changeSeedRequest()
   writeCAN(encryptedFrame, bob, 8);
 
   isBobSent = true;
-  
-  isSEEDRequestReceived = true;
 }
 
 // Function to copy 8 bytes of "unsigned char" text
@@ -149,7 +145,7 @@ bool checkSEED(unsigned char* msg)
 void PreProcessingPhase()
 {
     changetoSlave = false;
-    isSEEDRequestReceived = false;
+    isAliceRecevied = false;
     isBobSent = false;
 
     burst = 0;
@@ -160,6 +156,123 @@ void PreProcessingPhase()
       
     failsafe = 0;
     iteration = 0;
+}
+
+// Slave ProcessingPhase
+// After 5 whole messages ( 10 payloads ) sent
+// the controller will send a heartbeat request
+// the processing of the heartbeat will be done
+// this function.
+void ProcessingPhase()
+{
+  bad_hash(initialKey, bob_shared.x); // "hash" the initial key
+  Serial.print("Key after hash = ");
+  showMessage1(initialKey, false);
+
+  long int t1;
+  long int t2;
+  
+  t1 = millis();
+  unsigned char* decryptedMessge;
+  unsigned char tempDecryptedMessage[9] = "\0";
+
+  decryptedMessge = AES_128_decrypt(encryptedMessage);
+  
+  appendString(tempDecryptedMessage, decryptedMessge);
+  
+  removePadding(tempDecryptedMessage);  // in order to properly see the message we need to remove
+                                       // the added padding
+  t2 = millis();
+
+  Serial.print("The execution time for the decryption algorithm is: ");
+  Serial.print(t2 - t1);
+  Serial.print("ms");
+  Serial.println("");
+  
+  Serial.print("Decrypted message = ");
+  showMessage1(tempDecryptedMessage, true);
+}
+
+// Slave PostProcessingPhase
+// Encrypt and send messages to the slave
+void PostProcessingPhase()
+{
+
+  Serial.println("In ProcessingPhase");
+
+  byte data[8];
+
+  long int t1;
+  long int t2;
+  
+  t1 = millis();
+  
+  unsigned char plainText[9] = "Lock_Car";
+  unsigned char temp[17];
+    
+  unsigned char tempEncryptedMessage[17] = "\0";
+    
+  unsigned char temp1[16] = "";
+    
+  unsigned char* cipherText;
+    
+  bad_hash(initialKey, bob_shared.x); // "hash" the initial key
+  Serial.print("Key after hash = ");
+  showMessage1(initialKey, false);
+
+  Serial.print("Hashed key = ");
+  showMessage1(initialKey, false);
+  
+  copynString(temp, plainText, 16, 0);
+  Serial.print("temp = ");
+  showMessage1(temp, true);
+    
+  checkPadding(temp, 1);
+  Serial.print("Padded message = ");
+  showMessage1(temp, true);
+  
+  cipherText = AES_encrypt_128(initialKey, temp);
+  
+  copyString(temp1, cipherText);
+  Serial.print("Encrypted message = ");
+  showMessage1(temp1, true);
+    
+  appendString(tempEncryptedMessage, temp1);
+    
+  t2 = millis();
+  
+  Serial.print("The execution time for the encryption algorithm is: ");
+  Serial.print(t2 - t1);
+  Serial.print("ms");
+  Serial.println("");
+  
+  
+  Serial.println("Sending Encrypted Frame...");
+  Serial.print("Encrypted Message = ");
+  showMessage1(tempEncryptedMessage, false);
+
+  // send 2 extended packets: id is 29 bits, each packet will contain 8 bytes of data
+
+  copyByteString(data, tempEncryptedMessage, 0);
+  Serial.print("First payload = ");
+  showMessage1(data, true);
+
+  writeCAN(encryptedFrame, data, 8);
+  Serial.println("First payload sent....");
+  
+  delay(3000);
+
+  copyByteString(data, tempEncryptedMessage, 8);
+  Serial.print("Second payload = ");
+  showMessage1(data, true);
+
+  writeCAN(encryptedFrame, data, 8);
+  Serial.println("Second payload sent....");
+  
+  delay(3000);
+
+  changetoSlave = true;
+    
 }
 
 // Function to lock the entire network in case of an attack
@@ -177,7 +290,8 @@ void lockDownProcedure()
 
 // Function that runs in the booting phase
 // start the Serial monitor and the CAN interface
-void setup() {
+void setup() 
+{
   Serial.begin(115200);
   
   // Initialize MCP2515 running at 16MHz with a baudrate of 500kb/s and the masks and filters disabled.
@@ -194,10 +308,68 @@ void setup() {
 // Main state machine, will handle the network
 void loop() 
 {
-  if(changetoSlave)
+  if(!isNetworkInLockDown)
   {
-    readCAN();
+    
+    if(!isBobSent)
+    {
+      delay(2000);
+      
+      readCAN();
+      
+      failsafe++;
+    }
+    else if(changetoSlave)
+    {
+      if(burst != 2)
+      {
+        delay(2000);
+        
+        readCAN();  // if we did not receive 2 messages back to back we will read from CAN
+        failsafe++;  // and update the failsafe so there are no problems
+      }
+      else if(burst == 2)
+      {
+        ProcessingPhase();
+        iteration++;
+
+        delay(2000);
+      }
+      else
+      {
+        // do nothing  
+      }
+      
+    }
+    else if(!changetoSlave)
+    {
+      PostProcessingPhase(); // start the ProcessingPhase, should be sending encrypted messages.
+    }
+
+
+
+    if(failsafe > 10) // always check the failsafe to make sure everything is running smoothly
+    {
+      PreProcessingPhase(); // if there was a problem on the CAN reboot the system
+      
+      networkLockDown++;
+      failsafe = 0;
+    }
+    else if(networkLockDown > 10)
+    {
+      lockDownProcedure(); // if we suspect that an attack is happening then we will lock-down the network
+    }
+    else
+    {
+      // do nothing
+    }
   }
+  else
+  {
+    Serial.println("Network lock-down initiated!");
+    Serial.println("Please insert the master key to deactivate the lock-down protocol.");
+  }
+
 }
 
 // Function to send a CAN message
@@ -236,26 +408,30 @@ void readCAN()
       
       if((rxId & 0x80000000) == 0x80000000)     // Determine if ID is standard (11 bits) or extended (29 bits)
        {
-        sprintf(msgString, "Extended ID: 0x%.8lX  DLC: %1d  Data:", (rxId & 0x1FFFFFFF), len);
-        Serial.println(msgString);
+        Serial.println("Extended ID: 0x");
+        Serial.print((rxId & 0x1FFFFFFF));
+        Serial.print("  DLC: ");
+        Serial.print(len);
+        Serial.print("  Data:");
        }
       else
       {
-        sprintf(msgString, "Standard ID: 0x%.3lX       DLC: %1d  Data:", rxId, len);
-        Serial.println(msgString);
+        Serial.println("Extended ID: 0x");
+        Serial.print(rxId);
+        Serial.print("  DLC: ");
+        Serial.print(len);
+        Serial.print("  Data:");
       }
     
       if((rxId & 0x40000000) == 0x40000000)
       {    // Determine if message is a remote request frame.
-        sprintf(msgString, " REMOTE REQUEST FRAME");
-        Serial.println(msgString);
+        Serial.println(" REMOTE REQUEST FRAME");
       } 
       else 
       {
         for(byte i = 0; i < len; i++)
         {
-          sprintf(msgString, " 0x%.2X", rxBuf[i]);
-          Serial.print(msgString);
+          Serial.print(rxBuf[i], HEX);
         }
       }
 
@@ -282,7 +458,7 @@ void readCAN()
 // id: the current id of the frame
 inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
 {
-  if((packetSize == 8 && burst != 0) && (isBobSent && isSEEDRequestReceived))
+  if((packetSize == 8 && burst != 0) && (isBobSent && isAliceRecevied))
   {
       switch(burst)
       {
@@ -317,32 +493,36 @@ inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
     burst = 0;
 
   }
-  else if(packetSize == 8 && isBobSent)
+  else if((packetSize == 8 && isBobSent) && !isAliceRecevied)
   {
-    // writeCAN(encryptedFrame, alice_pub.x + alice_pub.y + F);
+    Point alice_pub;
     
-    burst = 0;
-      
-    Serial.println("Sending Alice");
-    Serial.print("Alice X = ");
-    Serial.println(alice_pub.x);
-    Serial.print("Alice Y = ");
-    Serial.println(alice_pub.y);
-  }
-  else if(packetSize == 3)
-  {
     Serial.println("Recevied Alice, calculating...");
 
-    alice_pub.x = message[0];
-    alice_pub.y = message[1];
-    bob_shared = scalar_mult(bob_secret, bob_pub);
+    alice_pub.x = (int)message[3];
+    alice_pub.y = (int)message[7];
     
-    Serial.println("Bob_shared calculated");
+    bob_shared = scalar_mult(bob_secret, alice_pub);
 
+    Serial.print("Alice.x = ");
+    Serial.println(alice_pub.x);
+    Serial.print("Alice.y = ");
+    Serial.println(alice_pub.y);
+
+    Serial.println("Bob_shared calculated");
+    
+    Serial.print("Bob_shared.x = ");
+    Serial.println(bob_shared.x);
+    Serial.print("Bob_shared.y = ");
+    Serial.println(bob_shared.y);
+    
     burst = 0;
+    failsafe = 0;
+
+    isAliceRecevied = true;
   }
   else 
   {
-    
+    // better performance, no statement stands in the air.
   }
 }

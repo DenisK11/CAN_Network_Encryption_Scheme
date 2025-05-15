@@ -42,7 +42,7 @@ static bool isAliceSent = false;
 static bool isNetworkInLockDown = false;
 
 // Encryption algorithm variables
-long encryptedFrame = 0;
+long unsigned int encryptedFrame = 0;
 unsigned char initialKey[17] = "Initial Keysssss";
 unsigned char encryptedMessage[17];
 
@@ -52,8 +52,6 @@ Point G = { 192, 105, false };
 int alice_secret;
 Point alice_shared;
 Point alice_pub;
-
-Point bob_pub;
 
 
 //------------------------------END of variable init----------------------------------
@@ -241,6 +239,7 @@ void ProcessingPhase()
 // this function.
 void PostProcessingPhase()
 {
+  bad_hash(initialKey, alice_shared.x); // "hash" the initial key
 
   long int t1;
   long int t2;
@@ -517,6 +516,8 @@ void ProcessCANInput(int packetSize, unsigned char* message)
   }
   else if(packetSize == 8 && !isSEEDrequestFulfilled)
   {
+    Point bob_pub;
+    
     Serial.println("Recevied Bob, calculating...");
 
     bob_pub.x = (int)message[3];
