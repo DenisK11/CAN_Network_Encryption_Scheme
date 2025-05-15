@@ -10,6 +10,7 @@
 // Helpful defines
 #define CAN0_INT 2
 #define AVR_UNO_CS 10
+#define _OPENDOOR "OPENDOOR"
 
 // CAN network interface variables
 MCP_CAN CAN0(AVR_UNO_CS);
@@ -18,6 +19,18 @@ unsigned char len = 0;
 unsigned char rxBuf[8];
 
 long unsigned int encryptedFrame = 0;
+
+// Attcking node scenarios: 
+// 1. Nothing about the network and how encryption works is known
+//    a. Listen to the messages
+//    b. Send the "OPENDOOR" message
+// 2. We will listen for the encrypted frame and send the messages so we will bypass the filter.
+//    a. Listen to the messages and record the encryptedFrame
+//    b. Send the "OPENDOOR" message
+// 3. We start from 2 and add the fact that we know the hashing funtion, but not the initialKey
+// 4. We go from 3 and we know the initialKey
+// 5. A more sophisticated attack, we will start from the fact that the only frame that the network will accept 
+// without encryption is the _CHANGE_SEED frame. We will basically DOS the network and force a timeout.
 
 // Function to show "unsigned char" text
 // The function acepts the following arguments:

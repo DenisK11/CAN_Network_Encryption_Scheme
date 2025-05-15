@@ -8,10 +8,13 @@
 #include "Utilities.h"
 
 // Helpful defines
-#define _CHANGE_SEED "chanSEED"
 #define CAN0_INT 2
 #define AVR_UNO_CS 10
+#define _CHANGE_SEED "chanSEED"
 #define _LOCKDOWN "LOCKDOWN"
+#define _OPENDOOR "OPENDOOR"
+#define _HEARTBEAT "HEARTBEA"
+#define _LOCKDOOR "LOCKDOOR"
 
 // CAN network interface variables
 MCP_CAN CAN0(AVR_UNO_CS);
@@ -130,12 +133,12 @@ void showMessage1(unsigned char* msg, bool standard)
 // Function to check if the SEED request was sent
 // The function acepts the following arguments:
 // msg: pointer to the message to be processed.
-bool checkSEED(unsigned char* msg)
+bool checkMessage(unsigned char* msg, unsigned char* text)
 {
   unsigned char i = 0;
   
   for(i = 0; i < 8; i++)
-    if(_CHANGE_SEED[i] != msg[i])
+    if(text[i] != msg[i])
       return false;
 
   return true;
@@ -144,7 +147,7 @@ bool checkSEED(unsigned char* msg)
 // Function to reinitialize the whole state machine
 void PreProcessingPhase()
 {
-    changetoSlave = false;
+    changetoSlave = true;
     isAliceRecevied = false;
     isBobSent = false;
 
@@ -191,6 +194,22 @@ void ProcessingPhase()
   
   Serial.print("Decrypted message = ");
   showMessage1(tempDecryptedMessage, true);
+
+  if(checkMessage(tempDecryptedMessage, _LOCKDOOR))
+  {
+    Serial.print("Door locked");
+  }
+  else if(checkMessage(tempDecryptedMessage, _LOCKDOWN))
+  {
+    isNetworkInLockDown = true;
+    failsafe = 0;
+  }
+  else if(checkMessage(tempDecryptedMessage, _OPENDOOR))
+  {
+    Serial.print("Door Open");
+    writeCAN(encryptedFrame, _OPENDOOR, 8);
+  }
+  
 }
 
 // Slave PostProcessingPhase
@@ -202,12 +221,15 @@ void PostProcessingPhase()
 
   byte data[8];
 
-  long int t1;
-  long int t2;
+  unsigned long int t1;
+  unsigned long int t2;
   
   t1 = millis();
   
-  unsigned char plainText[9] = "Lock_Car";
+  unsigned char plainText[9] = "";
+
+  copyByteString(plainText, _HEARTBEAT, 0);
+  
   unsigned char temp[17];
     
   unsigned char tempEncryptedMessage[17] = "\0";
@@ -271,7 +293,7 @@ void PostProcessingPhase()
   
   delay(3000);
 
-  changetoSlave = true;
+  PreProcessingPhase();
     
 }
 
@@ -483,7 +505,7 @@ inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
         
        }
   }
-  else if(checkSEED(message))
+  else if(checkMessage(message, _CHANGE_SEED))
   {
     encryptedFrame = id;
     changeSeedRequest();

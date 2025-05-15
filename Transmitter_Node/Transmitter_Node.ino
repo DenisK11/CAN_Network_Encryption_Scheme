@@ -11,8 +11,11 @@
 // Helpful defines
 #define AVR_MEGA_CS 53
 #define CAN0_INT 2
+#define _OPENDOOR "OPENDOOR"
 #define _CHANGE_SEED "chanSEED"
 #define _LOCKDOWN "LOCKDOWN"
+#define _HEARTBEAT "HEARTBEA"
+#define _LOCKDOOR "LOCKDOOR"
 
 // CAN network interface variables
 MCP_CAN CAN0(AVR_MEGA_CS);
@@ -151,7 +154,10 @@ void ProcessingPhase()
   
   t1 = millis();
   
-  unsigned char plainText[9] = "Lock_Car";
+  unsigned char plainText[9] = "";
+  
+  copyByteString(plainText, _LOCKDOOR, 0);
+  
   unsigned char temp[17];
     
   unsigned char tempEncryptedMessage[17] = "\0";
@@ -232,6 +238,20 @@ void ProcessingPhase()
     
 }
 
+// Function to check if the SEED request was sent
+// The function acepts the following arguments:
+// msg: pointer to the message to be processed.
+bool checkMessage(unsigned char* msg, unsigned char* text)
+{
+  unsigned char i = 0;
+  
+  for(i = 0; i < 8; i++)
+    if(text[i] != msg[i])
+      return false;
+
+  return true;
+}
+
 // Controller PostProcessingPhase
 // After 5 whole messages ( 10 payloads ) sent
 // the controller will send a heartbeat request
@@ -266,7 +286,26 @@ void PostProcessingPhase()
 
   scrollText(1, tempDecryptedMessage, 10, 16);
 
-  changetoSlave = false;
+  if(checkMessage(tempDecryptedMessage, _HEARTBEAT))
+  {
+    scrollText(1, " ", 10, 16);
+    scrollText(1, "Heartbeat Recevied", 10, 16);
+  }
+  else if(checkMessage(tempDecryptedMessage, _OPENDOOR))
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Door Unlocked"); // print data on the LCD screen
+    lcd.setCursor(1, 0);
+    lcd.print("Trusted Message");
+  }
+  else
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Door Locked"); // print data on the LCD screen
+    scrollText(1, "Non-Trusted Message", 10, 16);
+  }
+
+  PreProcessingPhase(); // reset the seed and the entire operation
 }
 
 // Function to lock the entire network in case of an attack
@@ -569,7 +608,7 @@ void ProcessCANInput(int packetSize, unsigned char* message)
     failsafe = 0;
     
   }
-  else 
+  else
   {
     // better performance, no statement stands in the air.
   }
