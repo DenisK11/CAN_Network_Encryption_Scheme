@@ -96,14 +96,14 @@ void showMessage1(unsigned char* msg, bool standard)
     {
         for (i = 0; i < 16; i++)
         {
-            Serial.print(" ");
+            Serial.print(F(" "));
             Serial.print(msg[i], HEX);
         }
     }
     else
         while (msg[i] != NULL && msg[i] != '\0' && msg[i] != 204)
         {
-            Serial.print(" ");
+            Serial.print(F(" "));
             Serial.print(msg[i], HEX);
             i++;
         }
@@ -123,9 +123,25 @@ inline void copyByteString(unsigned char* destination, unsigned char* source, un
     destination[i] = source[i - start];
 }
 
+// Function to overwrite 8 bytes of "unsigned char" text
+// The function acepts the following arguments:
+// destination: pointer to the destination string.
+// source: pointer to the source string.
+// start: the value of the element in the string that we are starting to copy
+inline void overwriteByteString(unsigned char* destination, unsigned char* source, unsigned char start)
+{
+  unsigned char i = 0;
+  
+  for(i = start; i < 8 + start; i++)
+    destination[i - start] = source[i];
+}
+
 // Function to reinitialize the whole state machine
 void PreProcessingPhase()
 {
+    Serial.println();
+    Serial.println(F("In PreProcessingPhase"));
+  
     changetoSlave = false;
     isSEEDrequestFulfilled = false;
     isAliceSent = false;
@@ -144,87 +160,80 @@ void PreProcessingPhase()
 // Encrypt and send messages to the slave
 void ProcessingPhase()
 {
-
-  Serial.println("In ProcessingPhase");
+  Serial.println();
+  Serial.println(F("In ProcessingPhase"));
 
   byte data[8];
 
   long int t1;
   long int t2;
   
-  t1 = millis();
-  
   unsigned char plainText[9] = "";
   
-  copyByteString(plainText, _LOCKDOOR, 0);
+  overwriteByteString(plainText, _LOCKDOOR, 0);
   
   unsigned char temp[17];
     
-  unsigned char tempEncryptedMessage[17] = "\0";
-    
-  unsigned char temp1[16] = "";
+  unsigned char temp1[17] = "";
     
   unsigned char* cipherText;
-    
+
   bad_hash(initialKey, alice_shared.x); // "hash" the initial key
 
-  Serial.print("Hashed key = ");
+  Serial.print(F("Hashed key = "));
   showMessage1(initialKey, false);
   
   copynString(temp, plainText, 16, 0);
-  Serial.print("temp = ");
+  Serial.print(F("temp = "));
   showMessage1(temp, true);
     
   checkPadding(temp, 1);
-  Serial.print("Padded message = ");
+  Serial.print(F("Padded message = "));
   showMessage1(temp, true);
+
+  t1 = millis();
   
   cipherText = AES_encrypt_128(initialKey, temp);
   
   copyString(temp1, cipherText);
-  Serial.print("Encrypted message = ");
-  showMessage1(temp1, true);
-    
-  appendString(tempEncryptedMessage, temp1);
     
   t2 = millis();
   
-  Serial.print("The execution time for the encryption algorithm is: ");
+  Serial.print(F("The execution time for the encryption algorithm is: "));
   Serial.print(t2 - t1);
-  Serial.print("ms");
-  Serial.println("");
+  Serial.print(F("ms"));
+  Serial.println(F(""));
   
   
-  Serial.println("Sending Encrypted Frame...");
-  Serial.print("Encrypted Message = ");
-  showMessage1(tempEncryptedMessage, false);
+  Serial.println(F("Sending Encrypted Frame..."));
+  Serial.print(F("Encrypted Message = "));
+  showMessage1(temp1, false);
 
   messageStatic = "Encryption CAN frame: ";
 
-  lcd.setCursor(0, 0);
-  lcd.print(messageStatic); // print data on the LCD screen
+  scrollText(0, messageStatic, 20, 16);
   
-  scrollText(1, tempEncryptedMessage, 10, 16);
+  scrollText(1, temp1, 20, 16);
     
   // send 2 extended packets: id is 29 bits, each packet will contain 8 bytes of data
 
-  copyByteString(data, tempEncryptedMessage, 0);
-  Serial.print("First payload = ");
+  overwriteByteString(data, temp1, 0);
+  Serial.print(F("First payload = "));
   showMessage1(data, true);
 
   writeCAN(encryptedFrame, data, 8);
-  Serial.println("First payload sent....");
+  Serial.println(F("First payload sent...."));
   
-  delay(3000);
+  delay(2000);
 
-  copyByteString(data, tempEncryptedMessage, 8);
-  Serial.print("Second payload = ");
+  overwriteByteString(data, temp1, 8);
+  Serial.print(F("Second payload = "));
   showMessage1(data, true);
 
   writeCAN(encryptedFrame, data, 8);
-  Serial.println("Second payload sent....");
+  Serial.println(F("Second payload sent...."));
   
-  delay(3000);
+  delay(2000);
 
     if(iteration == 10)
     {
@@ -253,13 +262,20 @@ bool checkMessage(unsigned char* msg, unsigned char* text)
 }
 
 // Controller PostProcessingPhase
-// After 5 whole messages ( 10 payloads ) sent
+// After 10 whole messages ( 20 payloads ) sent
 // the controller will send a heartbeat request
 // the processing of the heartbeat will be done
 // this function.
 void PostProcessingPhase()
 {
+  Serial.println();
+  Serial.println(F("In PostProcessing"));
   bad_hash(initialKey, alice_shared.x); // "hash" the initial key
+
+  generateKeys(initialKey);
+
+  Serial.print(F("Key after hash = "));
+  showMessage1(initialKey, false);
 
   long int t1;
   long int t2;
@@ -276,32 +292,33 @@ void PostProcessingPhase()
                                        // the added padding
   t2 = millis();
 
-  Serial.print("The execution time for the decryption algorithm is: ");
+  Serial.print(F("The execution time for the decryption algorithm is: "));
   Serial.print(t2 - t1);
-  Serial.print("ms");
-  Serial.println("");
+  Serial.print(F("ms"));
+  Serial.println(F(""));
   
-  Serial.print("Decrypted message = ");
+  Serial.print(F("Decrypted message = "));
   showMessage1(tempDecryptedMessage, true);
 
   scrollText(1, tempDecryptedMessage, 10, 16);
 
   if(checkMessage(tempDecryptedMessage, _HEARTBEAT))
   {
+    Serial.println(F("Heartbear Recevied"));
     scrollText(1, " ", 10, 16);
     scrollText(1, "Heartbeat Recevied", 10, 16);
   }
   else if(checkMessage(tempDecryptedMessage, _OPENDOOR))
   {
     lcd.setCursor(0, 0);
-    lcd.print("Door Unlocked"); // print data on the LCD screen
+    lcd.print(F("Door Unlocked")); // print data on the LCD screen
     lcd.setCursor(1, 0);
-    lcd.print("Trusted Message");
+    lcd.print(F("Trusted Message"));
   }
   else
   {
     lcd.setCursor(0, 0);
-    lcd.print("Door Locked"); // print data on the LCD screen
+    lcd.print(F("Door Locked")); // print data on the LCD screen
     scrollText(1, "Non-Trusted Message", 10, 16);
   }
 
@@ -317,8 +334,8 @@ void lockDownProcedure()
 
   writeCAN(encryptedFrame, _LOCKDOWN, 8);
   
-  Serial.println("Network lock-down initiated!");
-  Serial.println("Please insert the master key to deactivate the lock-down protocol.");
+  Serial.println(F("Network lock-down initiated!"));
+  Serial.println(F("Please insert the master key to deactivate the lock-down protocol."));
 }
 
 // Function that tells the slave to change it's seed
@@ -328,16 +345,19 @@ void changeSeedRequest()
 
   encryptedFrame = random(0x80000000, 0x1FFFFFFF);// 1FFFFFFF - higher boundry 29-bits all = 1
                                                   // 0x80000000 - lower boundry - 29-bits the first one = 1
-  Serial.print("The encrypted frame value for this session = ");
+  Serial.print(F("The encrypted frame value for this session = "));
   Serial.println(encryptedFrame, HEX);
   
   alice_secret = random(1, 200);
   alice_pub = scalar_mult(alice_secret, G); // generate the public "keys" for alice and bob
 
 
+  alice_pub.x = abs(alice_pub.x);
+  alice_pub.y = abs(alice_pub.y);
+
   writeCAN(encryptedFrame, _CHANGE_SEED, 8);
 
-  Serial.println("Sent the SEED change request");
+  Serial.println(F("Sent the SEED change request"));
 
   isSEEDrequestFulfilled = false;
   
@@ -349,13 +369,18 @@ void setup()
 {
   Serial.begin(115200);
 
-  delay(3000);
+  delay(1000);
+
+  // initialize LCD
+  lcd.init();
+  // turn on LCD backlight                      
+  lcd.backlight();
   
   // Initialize MCP2515 running at 16MHz with a baudrate of 500kb/s and the masks and filters disabled.
   if(CAN0.begin(MCP_ANY, CAN_500KBPS, MCP_16MHZ) == CAN_OK)
-    Serial.println("MCP2515 Initialized Successfully!");
+    Serial.println(F("MCP2515 Initialized Successfully!"));
   else
-    Serial.println("Error Initializing MCP2515...");
+    Serial.println(F("Error Initializing MCP2515..."));
   
   CAN0.setMode(MCP_NORMAL);                     // Set operation mode to normal so the MCP2515 sends acks to received data.
 
@@ -369,20 +394,20 @@ void loop()
 
   if(!isNetworkInLockDown)
   {
-
+    
     if(!isSEEDrequestFulfilled)
     {
       changeSeedRequest();
       
-      delay(2000);
       failsafe++;
+
+      delay(1000);
       
       readCAN(); // We will continue to send SEED requests until we get an answer.
     }            
     else if(!isAliceSent)
     {
       delay(2000);
-      
       readCAN();
       failsafe++;
     }
@@ -391,7 +416,6 @@ void loop()
       iteration++;
       
       ProcessingPhase();
-      delay(2000);
     }
     else if(changetoSlave)  // Check if the ECU is still active
     {
@@ -438,13 +462,13 @@ void loop()
     messageStatic = "Network Locked";
     messageToScroll = "Please insert the master key to deactivate the lock-down protocol.";
     
-    Serial.println("Network lock-down initiated!");
-    Serial.println("Please insert the master key to deactivate the lock-down protocol.");
+    Serial.println(F("Network lock-down initiated!"));
+    Serial.println(F("Please insert the master key to deactivate the lock-down protocol."));
     
     lcd.setCursor(0, 0);
     lcd.print(messageStatic); // print data on the LCD screen
   
-    scrollText(1, messageToScroll, 10, 16);  
+    scrollText(1, messageToScroll, 500, 16);  
   }
 }
 
@@ -507,9 +531,9 @@ void readCAN()
         }
       }
 
-      ProcessCANInput(len, rxBuf);
-      
       Serial.println();
+
+      ProcessCANInput(len, rxBuf);
     }
     else
     {
@@ -548,7 +572,7 @@ void ProcessCANInput(int packetSize, unsigned char* message)
              break;
              
         default:
-              Serial.println("How did u get in here? Check burst conditions ASAP!!!");
+              Serial.println(F("How did u get in here? Check burst conditions ASAP!!!"));
               break;
         
        }
@@ -557,23 +581,31 @@ void ProcessCANInput(int packetSize, unsigned char* message)
   {
     Point bob_pub;
     
-    Serial.println("Recevied Bob, calculating...");
+    Serial.println(F("Recevied Bob, calculating..."));
 
     bob_pub.x = (int)message[3];
     bob_pub.y = (int)message[7];
+
+    
     
     alice_shared = scalar_mult(alice_secret, bob_pub);
 
-    Serial.print("Bob.x = ");
+    alice_shared.x = alice_pub.x;
+    alice_shared.y = alice_pub.y;
+
+    Serial.print(F("Alice secret = "));
+    Serial.println(alice_secret);
+
+    Serial.print(F("Bob.x = "));
     Serial.println(bob_pub.x);
-    Serial.print("Bob.y = ");
+    Serial.print(F("Bob.y = "));
     Serial.println(bob_pub.y);
 
-    Serial.println("Alice_shared calculated");
+    Serial.println(F("Alice_shared calculated"));
     
-    Serial.print("Alice_shared.x = ");
+    Serial.print(F("Alice_shared.x = "));
     Serial.println(alice_shared.x);
-    Serial.print("Alice_shared.y = ");
+    Serial.print(F("Alice_shared.y = "));
     Serial.println(alice_shared.y);
     
     burst = 0;
@@ -597,10 +629,10 @@ void ProcessCANInput(int packetSize, unsigned char* message)
 
     writeCAN(encryptedFrame, alice, 8);
       
-    Serial.println("Sending Alice");
-    Serial.print("Alice X = ");
+    Serial.println(F("Sending Alice"));
+    Serial.print(F("Alice X = "));
     Serial.println(alice_pub.x);
-    Serial.print("Alice Y = ");
+    Serial.print(F("Alice Y = "));
     Serial.println(alice_pub.y);
 
     isAliceSent = true;

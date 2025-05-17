@@ -60,9 +60,9 @@ void changeSeedRequest()
   bob_pub.x = abs(bob_pub.x);
   bob_pub.y = abs(bob_pub.y);
 
-  Serial.println("Bob = ");
+  Serial.println(F("Bob = "));
   Serial.print(bob_pub.x);
-  Serial.print(" ");
+  Serial.print(F(" "));
   Serial.println(bob_pub.y);
 
 
@@ -76,12 +76,13 @@ void changeSeedRequest()
   bob[6] = (bob_pub.y  >> 8  )  & 0xFF;
   bob[7] = bob_pub.y & 0xFF;
 
-  Serial.println("Payload Sent on CAN");
+  Serial.println(F("Payload Sent on CAN"));
   
   for(int i = 0; i < 8; i++)
   {
-    Serial.print(bob[i]);
-    Serial.print(" ");
+    Serial.print(F("0x"));
+    Serial.print(bob[i], HEX);
+    Serial.print(F(" "));
   }
   
   writeCAN(encryptedFrame, bob, 8);
@@ -89,12 +90,25 @@ void changeSeedRequest()
   isBobSent = true;
 }
 
+// Function to overwrite 8 bytes of "unsigned char" text
+// The function acepts the following arguments:
+// destination: pointer to the destination string.
+// source: pointer to the source string.
+// start: the value of the element in the string that we are starting to copy
+inline void overwriteByteString(unsigned char* destination, unsigned char* source, unsigned char start)
+{
+  unsigned char i = 0;
+  
+  for(i = start; i < 8 + start; i++)
+    destination[i - start] = source[i];
+}
+
 // Function to copy 8 bytes of "unsigned char" text
 // The function acepts the following arguments:
 // destination: pointer to the destination string.
 // source: pointer to the source string.
 // start: the value of the element in the string that we are starting to copy
-void copyByteString(unsigned char* destination, unsigned char* source, unsigned char start)
+inline void copyByteString(unsigned char* destination, unsigned char* source, unsigned char start)
 {
   unsigned char i = 0;
   
@@ -169,7 +183,10 @@ void PreProcessingPhase()
 void ProcessingPhase()
 {
   bad_hash(initialKey, bob_shared.x); // "hash" the initial key
-  Serial.print("Key after hash = ");
+
+  generateKeys(initialKey);
+  
+  Serial.print(F("Key after hash = "));
   showMessage1(initialKey, false);
 
   long int t1;
@@ -187,27 +204,37 @@ void ProcessingPhase()
                                        // the added padding
   t2 = millis();
 
-  Serial.print("The execution time for the decryption algorithm is: ");
+  Serial.print(F("The execution time for the decryption algorithm is: "));
   Serial.print(t2 - t1);
-  Serial.print("ms");
-  Serial.println("");
+  Serial.print(F("ms"));
+  Serial.println(F(""));
   
-  Serial.print("Decrypted message = ");
+  Serial.print(F("Decrypted message = "));
   showMessage1(tempDecryptedMessage, true);
 
   if(checkMessage(tempDecryptedMessage, _LOCKDOOR))
   {
-    Serial.print("Door locked");
+    Serial.println(F("Door locked"));
   }
   else if(checkMessage(tempDecryptedMessage, _LOCKDOWN))
-  {
+  { 
     isNetworkInLockDown = true;
     failsafe = 0;
   }
   else if(checkMessage(tempDecryptedMessage, _OPENDOOR))
   {
-    Serial.print("Door Open");
+    Serial.println(F("Door Open"));
     writeCAN(encryptedFrame, _OPENDOOR, 8);
+  }
+
+  if(iteration == 10)
+  {
+    iteration = 0;
+    changetoSlave = false;  
+  }
+  else
+  {
+    // do nothing but save on time  
   }
   
 }
@@ -217,81 +244,73 @@ void ProcessingPhase()
 void PostProcessingPhase()
 {
 
-  Serial.println("In ProcessingPhase");
+  Serial.println(F("In PostProcessingPhase"));
 
   byte data[8];
 
   unsigned long int t1;
   unsigned long int t2;
   
-  t1 = millis();
-  
   unsigned char plainText[9] = "";
 
-  copyByteString(plainText, _HEARTBEAT, 0);
+  overwriteByteString(plainText, _HEARTBEAT, 0);
   
   unsigned char temp[17];
     
-  unsigned char tempEncryptedMessage[17] = "\0";
-    
-  unsigned char temp1[16] = "";
+  unsigned char temp1[17] = "";
     
   unsigned char* cipherText;
-    
-  bad_hash(initialKey, bob_shared.x); // "hash" the initial key
-  Serial.print("Key after hash = ");
-  showMessage1(initialKey, false);
 
-  Serial.print("Hashed key = ");
+  // bad_hash(initialKey, bob_shared.x); // "hash" the initial key
+
+  Serial.println(F("Hashed key = "));
   showMessage1(initialKey, false);
   
   copynString(temp, plainText, 16, 0);
-  Serial.print("temp = ");
+  Serial.print(F("temp = "));
   showMessage1(temp, true);
     
   checkPadding(temp, 1);
-  Serial.print("Padded message = ");
+  Serial.print(F("Padded message = "));
   showMessage1(temp, true);
+  
+  t1 = millis();
   
   cipherText = AES_encrypt_128(initialKey, temp);
   
   copyString(temp1, cipherText);
-  Serial.print("Encrypted message = ");
+  Serial.print(F("Encrypted message = "));
   showMessage1(temp1, true);
-    
-  appendString(tempEncryptedMessage, temp1);
-    
+
   t2 = millis();
   
-  Serial.print("The execution time for the encryption algorithm is: ");
+  Serial.print(F("The execution time for the encryption algorithm is: "));
   Serial.print(t2 - t1);
-  Serial.print("ms");
-  Serial.println("");
+  Serial.print(F("ms"));
+  Serial.println(F(""));
   
   
-  Serial.println("Sending Encrypted Frame...");
-  Serial.print("Encrypted Message = ");
-  showMessage1(tempEncryptedMessage, false);
-
+  Serial.println(F("Sending Encrypted Frame..."));
+  
   // send 2 extended packets: id is 29 bits, each packet will contain 8 bytes of data
 
-  copyByteString(data, tempEncryptedMessage, 0);
-  Serial.print("First payload = ");
+  overwriteByteString(data, temp1, 0);
+  Serial.print(F("First payload = "));
   showMessage1(data, true);
 
   writeCAN(encryptedFrame, data, 8);
-  Serial.println("First payload sent....");
+  Serial.println(F("First payload sent...."));
   
-  delay(3000);
+  delay(2000);
 
-  copyByteString(data, tempEncryptedMessage, 8);
-  Serial.print("Second payload = ");
+  overwriteByteString(data, temp1, 8);
+  Serial.print(F("Second payload = "));
   showMessage1(data, true);
 
   writeCAN(encryptedFrame, data, 8);
-  Serial.println("Second payload sent....");
+  Serial.println(F("Second payload sent...."));
   
-  delay(3000);
+  delay(2000);
 
   PreProcessingPhase();
     
@@ -306,8 +325,8 @@ void lockDownProcedure()
 
   writeCAN(encryptedFrame, _LOCKDOWN, 8);
   
-  Serial.println("Network lock-down initiated!");
-  Serial.println("Please insert the master key to deactivate the lock-down protocol.");
+  Serial.println(F("Network lock-down initiated!"));
+  Serial.println(F("Please insert the master key to deactivate the lock-down protocol."));
 }
 
 // Function that runs in the booting phase
@@ -318,9 +337,9 @@ void setup()
   
   // Initialize MCP2515 running at 16MHz with a baudrate of 500kb/s and the masks and filters disabled.
   if(CAN0.begin(MCP_ANY, CAN_500KBPS, MCP_16MHZ) == CAN_OK)
-    Serial.println("MCP2515 Initialized Successfully!");
+    Serial.println(F("MCP2515 Initialized Successfully!"));
   else
-    Serial.println("Error Initializing MCP2515...");
+    Serial.println(F("Error Initializing MCP2515..."));
   
   CAN0.setMode(MCP_NORMAL);                     // Set operation mode to normal so the MCP2515 sends acks to received data.
 
@@ -334,8 +353,8 @@ void loop()
   {
     
     if(!isBobSent)
-    {
-      delay(2000);
+    { 
+      delay(1000);
       
       readCAN();
       
@@ -345,17 +364,19 @@ void loop()
     {
       if(burst != 2)
       {
-        delay(2000);
+        Serial.print(F("burst = "));
+        Serial.println(burst);
+        delay(3500);
         
         readCAN();  // if we did not receive 2 messages back to back we will read from CAN
         failsafe++;  // and update the failsafe so there are no problems
       }
       else if(burst == 2)
       {
+        burst = 0;
         ProcessingPhase();
         iteration++;
 
-        delay(2000);
       }
       else
       {
@@ -367,8 +388,11 @@ void loop()
     {
       PostProcessingPhase(); // start the ProcessingPhase, should be sending encrypted messages.
     }
-
-
+    else
+    {
+      // do nothing  
+    }
+    
 
     if(failsafe > 10) // always check the failsafe to make sure everything is running smoothly
     {
@@ -388,8 +412,8 @@ void loop()
   }
   else
   {
-    Serial.println("Network lock-down initiated!");
-    Serial.println("Please insert the master key to deactivate the lock-down protocol.");
+    Serial.println(F("Network lock-down initiated!"));
+    Serial.println(F("Please insert the master key to deactivate the lock-down protocol."));
   }
 
 }
@@ -406,11 +430,11 @@ void writeCAN(long id, unsigned char* data, unsigned char leng)
   
   if(sndStat == CAN_OK)
   {
-    Serial.println("Message Sent Successfully!");
+    Serial.println(F("Message Sent Successfully!"));
   } 
   else 
   {
-    Serial.println("Error Sending Message...");
+    Serial.println(F("Error Sending Message..."));
   }
   delay(100);   // send data per 100ms
   
@@ -430,30 +454,31 @@ void readCAN()
       
       if((rxId & 0x80000000) == 0x80000000)     // Determine if ID is standard (11 bits) or extended (29 bits)
        {
-        Serial.println("Extended ID: 0x");
-        Serial.print((rxId & 0x1FFFFFFF));
-        Serial.print("  DLC: ");
+        Serial.print(F("Extended ID: 0x"));
+        Serial.print((rxId & 0x1FFFFFFF), HEX);
+        Serial.print(F("  DLC: "));
         Serial.print(len);
-        Serial.print("  Data:");
+        Serial.print(F("  Data:"));
        }
       else
       {
-        Serial.println("Extended ID: 0x");
+        Serial.println(F("Extended ID: 0x"));
         Serial.print(rxId);
-        Serial.print("  DLC: ");
+        Serial.print(F("  DLC: "));
         Serial.print(len);
-        Serial.print("  Data:");
+        Serial.print(F("  Data:"));
       }
     
       if((rxId & 0x40000000) == 0x40000000)
       {    // Determine if message is a remote request frame.
-        Serial.println(" REMOTE REQUEST FRAME");
+        Serial.println(F(" REMOTE REQUEST FRAME"));
       } 
       else 
       {
         for(byte i = 0; i < len; i++)
         {
           Serial.print(rxBuf[i], HEX);
+          Serial.print(F(" "));
         }
       }
 
@@ -480,11 +505,17 @@ void readCAN()
 // id: the current id of the frame
 inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
 {
+
+  Serial.print(F("Message = "));
+  showMessage1(message, false);
+  
+  
   if((packetSize == 8 && burst != 0) && (isBobSent && isAliceRecevied))
   {
       switch(burst)
       {
         case 1:
+            Serial.println(F("In burst = 1"));
             copyByteString(encryptedMessage, message, 0);
             showMessage1(encryptedMessage, true);
 
@@ -493,14 +524,14 @@ inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
   
         case 2:
              failsafe = 0;
-             burst = 0;
-             
+
+             Serial.println(F("In burst = 2"));
              copyByteString(encryptedMessage, message, 8);
              showMessage1(encryptedMessage, true);
              break;
              
         default:
-              Serial.println("How did u get in here? Check burst conditions ASAP!!!");
+              Serial.println(F("How did u get in here? Check burst conditions ASAP!!!"));
               break;
         
        }
@@ -510,7 +541,7 @@ inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
     encryptedFrame = id;
     changeSeedRequest();
     
-    Serial.println("SEED changed");
+    Serial.println(F("SEED changed"));
 
     burst = 0;
 
@@ -519,23 +550,26 @@ inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
   {
     Point alice_pub;
     
-    Serial.println("Recevied Alice, calculating...");
+    Serial.println(F("Recevied Alice, calculating..."));
 
     alice_pub.x = (int)message[3];
     alice_pub.y = (int)message[7];
     
     bob_shared = scalar_mult(bob_secret, alice_pub);
 
-    Serial.print("Alice.x = ");
+    Serial.print(F("Bob secret = "));
+    Serial.println(bob_secret);
+
+    Serial.print(F("Alice.x = "));
     Serial.println(alice_pub.x);
-    Serial.print("Alice.y = ");
+    Serial.print(F("Alice.y = "));
     Serial.println(alice_pub.y);
 
-    Serial.println("Bob_shared calculated");
+    Serial.println(F("Bob_shared calculated"));
     
-    Serial.print("Bob_shared.x = ");
+    Serial.print(F("Bob_shared.x = "));
     Serial.println(bob_shared.x);
-    Serial.print("Bob_shared.y = ");
+    Serial.print(F("Bob_shared.y = "));
     Serial.println(bob_shared.y);
     
     burst = 0;

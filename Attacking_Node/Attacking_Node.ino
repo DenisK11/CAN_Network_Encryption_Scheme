@@ -20,6 +20,8 @@ unsigned char rxBuf[8];
 
 long unsigned int encryptedFrame = 0;
 
+static unsigned int iteration = 0;
+
 // Attcking node scenarios: 
 // 1. Nothing about the network and how encryption works is known
 //    a. Listen to the messages
@@ -89,8 +91,32 @@ void setup()
 
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
+void loop() 
+{
+  iteration++;
+  
+  if(iteration <= 20)
+  {
+    // first attack  
+  }
+  else if(iteration <= 40)
+  {
+    // second attack  
+  }
+  else if(iteration <= 60)
+  {
+    // third attack  
+  }
+  else if(iteration <= 80)
+  {
+    // fourth  attack
+  }
+  else if(iteration <= 100)
+  {
+    // fifth attack  
+  }
+  else
+    iteration = 0;
 
 }
 
