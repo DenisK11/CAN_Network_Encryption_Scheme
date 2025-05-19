@@ -317,6 +317,7 @@ void PostProcessingPhase()
   }
   else
   {
+    failsafe = 5;
     lcd.setCursor(0, 0);
     lcd.print(F("Door Locked")); // print data on the LCD screen
     scrollText(1, "Non-Trusted Message", 10, 16);

